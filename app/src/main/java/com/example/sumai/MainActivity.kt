@@ -26,15 +26,21 @@ class MainActivity : FragmentActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var tvTimer: TextView
     private lateinit var btnRecord: Button
+    private lateinit var btnPause: Button
+    private lateinit var btnStop: Button
     private var model: Model? = null
     private var isRecording = false
+    private var isPaused = false
     private var recordingJob: Job? = null
     private var startTime = 0L
+    private var pausedDuration = 0L
     private var recognizer: Recognizer? = null
     private var currentText = ""
+    private var audioRecord: AudioRecord? = null
     private val handler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
-
+    private var tempFile: File? = null
+    private var fos: FileOutputStream? = null
     companion object {
         private const val PERMISSION_REQUEST_RECORD_AUDIO = 1
         private const val MAX_RECORDING_SECONDS = 3600 // 1 час
@@ -48,14 +54,11 @@ class MainActivity : FragmentActivity() {
         tvStatus = findViewById(R.id.tvStatus)
         tvTimer = findViewById(R.id.tvTimer)
         btnRecord = findViewById(R.id.btnRecord)
-
-        btnRecord.setOnClickListener {
-            if (isRecording) {
-                stopRecording()
-            } else {
-                startRecording()
-            }
-        }
+        btnPause = findViewById(R.id.btnPause)
+        btnStop = findViewById(R.id.btnStop)
+        btnRecord.setOnClickListener { startRecording() }
+        btnPause.setOnClickListener { togglePause() }
+        btnStop.setOnClickListener { finishRecording() }
 
         if (hasPermission()) {
             loadModel()
@@ -115,6 +118,7 @@ class MainActivity : FragmentActivity() {
                 val minutes = elapsed / 60
                 val seconds = elapsed % 60
                 tvTimer.text = String.format("%02d:%02d", minutes, seconds)
+                tvTimer.setTextColor(resources.getColor(android.R.color.black))
 
                 if (elapsed >= MAX_RECORDING_SECONDS - 10 && elapsed < MAX_RECORDING_SECONDS) {
                     tvTimer.setTextColor(resources.getColor(android.R.color.holo_orange_dark))
@@ -155,14 +159,16 @@ class MainActivity : FragmentActivity() {
         }
 
         isRecording = true
-        btnRecord.text = "Остановить"
+        isPaused = false
+        pausedDuration = 0L
+        btnRecord.isEnabled = false
+        btnPause.isEnabled = true
+        btnStop.isEnabled = true
         currentText = ""
         tvResult.text = ""
-        tvStatus.text = "Запись"
-        tvTimer.text = "00:00"
+        tvStatus.text = "Запись..."
         startTimer()
 
-        // Создаём распознаватель для реального времени
         recognizer = Recognizer(model, 16000.0f)
 
         recordingJob = CoroutineScope(Dispatchers.IO).launch {
@@ -173,7 +179,6 @@ class MainActivity : FragmentActivity() {
                 AudioFormat.ENCODING_PCM_16BIT
             )
 
-            var audioRecord: AudioRecord? = null
             try {
                 audioRecord = AudioRecord(
                     MediaRecorder.AudioSource.MIC,
@@ -183,25 +188,26 @@ class MainActivity : FragmentActivity() {
                     bufferSize
                 )
 
-                if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+                if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                     withContext(Dispatchers.Main) {
                         tvStatus.text = "Ошибка микрофона"
-                        btnRecord.text = "Запись"
-                        isRecording = false
-                        stopTimer()
+                        resetButtons()
                     }
                     return@launch
                 }
 
-                audioRecord.startRecording()
+                audioRecord?.startRecording()
                 val buffer = ByteArray(bufferSize)
 
-                while (isRecording && (System.currentTimeMillis() - startTime) / 1000 < MAX_RECORDING_SECONDS) {
-                    val bytesRead = audioRecord.read(buffer, 0, buffer.size)
+                while (isRecording) {
+                    if (isPaused) {
+                        delay(100)
+                        continue
+                    }
+
+                    val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: break
                     if (bytesRead > 0) {
-                        // Отправляем в распознаватель в реальном времени
                         if (recognizer?.acceptWaveForm(buffer, bytesRead) == true) {
-                            // Фраза закончена - получаем финальный результат
                             val result = recognizer?.result
                             result?.let {
                                 val text = parseResult(it)
@@ -212,7 +218,6 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                         } else {
-                            // Промежуточный результат
                             val partial = recognizer?.partialResult
                             partial?.let {
                                 val text = parsePartialResult(it)
@@ -226,9 +231,8 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                audioRecord.stop()
+                audioRecord?.stop()
 
-                // Получаем финальный результат после остановки
                 val finalResult = recognizer?.result
                 finalResult?.let {
                     val text = parseResult(it)
@@ -241,24 +245,19 @@ class MainActivity : FragmentActivity() {
 
                 withContext(Dispatchers.Main) {
                     tvStatus.text = "Запись завершена"
-                    btnRecord.text = "Запись"
-                    isRecording = false
+                    resetButtons()
                     stopTimer()
                 }
 
             } catch (e: SecurityException) {
                 withContext(Dispatchers.Main) {
                     tvStatus.text = "Нет разрешения"
-                    btnRecord.text = "Запись"
-                    isRecording = false
-                    stopTimer()
+                    resetButtons()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     tvStatus.text = "Ошибка: ${e.message}"
-                    btnRecord.text = "Запись"
-                    isRecording = false
-                    stopTimer()
+                    resetButtons()
                     e.printStackTrace()
                 }
             } finally {
@@ -273,8 +272,8 @@ class MainActivity : FragmentActivity() {
         if (!isRecording) return
         isRecording = false
         recordingJob?.cancel()
-        btnRecord.text = "Остановка..."
-        tvStatus.text = "Останавливаю..."
+        btnRecord.text = "Начать"
+        tvStatus.text = "Останавлено"
         stopTimer()
     }
 
@@ -323,5 +322,36 @@ class MainActivity : FragmentActivity() {
         recordingJob?.cancel()
         recognizer?.close()
         model?.close()
+    }
+    private fun togglePause() {
+        if (!isRecording) return
+
+        isPaused = !isPaused
+        if (isPaused) {
+            btnPause.text = "Продолжить"
+            tvStatus.text = "На паузе"
+        } else {
+            btnPause.text = "Пауза"
+            tvStatus.text = "Запись"
+            // Корректируем таймер
+            val pauseTime = System.currentTimeMillis() - (startTime + pausedDuration)
+            pausedDuration += pauseTime
+        }
+    }
+
+    private fun finishRecording() {
+        if (!isRecording) return
+        isRecording = false
+        tvStatus.text = "Завершение"
+        btnStop.isEnabled = false
+        btnPause.isEnabled = false
+    }
+    private fun resetButtons() {
+        isRecording = false
+        isPaused = false
+        btnRecord.isEnabled = true
+        btnPause.isEnabled = false
+        btnStop.isEnabled = false
+        btnPause.text = "Пауза"
     }
 }
