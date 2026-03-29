@@ -2,6 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Разрешение на запись звука (уже есть) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Добавьте эту строку для совместимости с Vosk -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Для лучшей работы на телефонах добавьте -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -18,10 +28,10 @@
             android:theme="@style/Theme.SumAI">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".TestVoskActivity" />
     </application>
 
 </manifest>
