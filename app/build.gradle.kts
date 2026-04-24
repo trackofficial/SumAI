@@ -16,10 +16,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-
+        ndkVersion = "27.0.12077973"
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
-
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -52,14 +53,23 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-    // Добавляем эти зависимости
+    // UI
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.9.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
-    // Vosk
+    // Vosk (распознавание речи)
     implementation("com.alphacephei:vosk-android:0.3.47")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    implementation("io.github.ljcamargo:llamacpp-kotlin:0.2.0")
+
+    // HTTP и JSON (для SearXNG)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    // HTML парсинг (для SearXNG)
+    implementation("org.jsoup:jsoup:1.17.2")
 }

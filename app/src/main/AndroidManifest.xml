@@ -2,17 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Разрешение на запись звука (уже есть) -->
+    <!-- Разрешение на запись звука -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Добавьте эту строку для совместимости с Vosk -->
+    <!-- Для совместимости с Vosk -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Для лучшей работы на телефонах добавьте -->
+    <!-- Для сохранения файлов -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <application
+        android:extractNativeLibs="true"
+        android:largeHeap="true"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -21,6 +23,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.SumAI">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -31,7 +34,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Активность для просмотра конспекта -->
+        <activity
+            android:name=".MarkdownViewerActivity"
+            android:parentActivityName=".MainActivity"
+            android:theme="@style/Theme.SumAI" />
+
+        <!-- Тестовая активность Vosk (если есть) -->
         <activity android:name=".TestVoskActivity" />
+
     </application>
 
 </manifest>

@@ -3,8 +3,10 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:background="#F5F5F5"
     android:padding="16dp">
 
+    <!-- Ряд кнопок записи -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -17,7 +19,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="Запись"
+            android:text="🎙️ Запись"
             android:enabled="false" />
 
         <Button
@@ -26,7 +28,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="Пауза"
+            android:text="⏸️ Пауза"
             android:enabled="false" />
 
         <Button
@@ -34,44 +36,143 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Завершить"
+            android:text="⏹️ Стоп"
             android:enabled="false" />
 
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tvTimer"
+    <!-- Ряд кнопок обработки -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/btnProcess"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:text="🤖 Обработать" />
+
+        <Button
+            android:id="@+id/btnClear"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:text="🗑️ Очистить" />
+
+        <Button
+            android:id="@+id/btnViewSummary"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="📄 Просмотр"
+            android:enabled="false" />
+
+    </LinearLayout>
+
+    <!-- Таймер и статус -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="00:00"
-        android:textSize="24sp"
-        android:textAlignment="center"
-        android:textStyle="bold"/>
+        android:layout_marginBottom="16dp"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="16dp"
+        android:background="#FFFFFF"
+        android:elevation="2dp">
 
-    <TextView
-        android:id="@+id/tvStatus"
+        <TextView
+            android:id="@+id/tvTimer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00"
+            android:textSize="48sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:textColor="#6200EE" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Готов к работе"
+            android:textSize="14sp"
+            android:textColor="#666666" />
+
+    </LinearLayout>
+
+    <!-- Прогресс загрузки AI (исправлено: wrap_content вместо 8dp) -->
+    <LinearLayout
+        android:id="@+id/layoutProgress"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Готов"
-        android:textSize="14sp"
-        android:textAlignment="center"/>
+        android:orientation="vertical"
+        android:layout_marginTop="16dp"
+        android:visibility="gone">
 
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:progressTint="#6200EE"
+            android:max="100" />
+
+        <TextView
+            android:id="@+id/tvProgressMB"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAlignment="center"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginTop="8dp"
+            android:textColor="#6200EE" />
+
+        <TextView
+            android:id="@+id/tvProgressSpeed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAlignment="center"
+            android:textSize="12sp"
+            android:textColor="#666666" />
+
+        <TextView
+            android:id="@+id/tvProgressStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAlignment="center"
+            android:textSize="12sp"
+            android:layout_marginTop="4dp"
+            android:textColor="#999999" />
+
+    </LinearLayout>
+
+    <!-- Результат -->
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="16dp">
+        android:background="#FFFFFF"
+        android:elevation="2dp"
+        android:padding="12dp"
+        android:scrollbars="vertical">
 
         <TextView
             android:id="@+id/tvResult"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text=""
-            android:textSize="18sp"
-            android:padding="8dp"/>
+            android:text="Здесь будет результат распознавания или конспект..."
+            android:textSize="16sp"
+            android:lineSpacingExtra="4dp"
+            android:textColor="#333333" />
 
     </ScrollView>
 

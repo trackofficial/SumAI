@@ -1,15 +1,56 @@
+# Модели LLM (большие файлы)
+*.gguf
+*.task
+*.bin
+*.onnx
+app/src/main/llm_assets/
+app/src/main/assets/llm_model/
+
+# Логи Kotlin и ошибки компиляции
+.kotlin/errors/
+*.log
+hs_err_pid*.log
+replay_pid*.log
+
+# Временные файлы сборки
 *.iml
-.gradle
+.gradle/
 /local.properties
-/.idea/caches
-/.idea/libraries
+/.idea/caches/
+/.idea/libraries/
 /.idea/modules.xml
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# Файлы конфигурации IDE
+.vscode/
+.idea/
+
+# Пользовательские настройки
 local.properties
+keystore.properties
+
+# Логи тестов
+/test-results/
+/test-output/
+
+# Запасные копии
+*.bak
+*.tmp
+*.swp
+*~
+
+# Скомпилированные файлы
+*.class
+*.dex
+
+# Ключи API (если хранятся)
+gradle.properties
+*_API_KEY*
+DEEPSEEK_API_KEY*
