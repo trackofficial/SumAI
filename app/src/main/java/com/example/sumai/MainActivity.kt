@@ -117,28 +117,41 @@ class MainActivity : FragmentActivity() {
         tvProgressMB.text = "0 МБ / ? МБ"
         tvProgressSpeed.text = ""
 
+// В onCreate, после инициализации lucyProcessor
         lifecycleScope.launch {
             lucyProcessor.loadModel(
                 onProgress = { progress ->
                     runOnUiThread {
+                        layoutProgress.visibility = View.VISIBLE
+                        progressBar.visibility = View.VISIBLE
+                        tvProgressStatus.visibility = View.VISIBLE
                         progressBar.progress = progress
-                        tvProgressStatus.text = "Загрузка Lucy: $progress%"
+                        tvProgressStatus.text = "📥 Скачивание модели Lucy: $progress%"
+
+                        if (progress == 100) {
+                            tvProgressStatus.text = "✅ Модель готова!"
+                            handler.postDelayed({
+                                layoutProgress.visibility = View.GONE
+                                progressBar.visibility = View.GONE
+                                tvProgressStatus.visibility = View.GONE
+                            }, 1500)
+                        }
                     }
                 },
                 onReady = {
                     runOnUiThread {
-                        tvStatus.text = "✅ Lucy готова"
+                        tvStatus.text = "✅ Lucy готова к работе"
                         btnProcess.isEnabled = true
                     }
                 },
                 onError = { error ->
                     runOnUiThread {
                         tvStatus.text = "❌ Ошибка: $error"
+                        Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
                     }
                 }
             )
         }
-
 
         // Загрузка Vosk модели
         if (hasPermission()) {
@@ -354,7 +367,11 @@ class MainActivity : FragmentActivity() {
 
 
     private fun processLecture() {
-        if (currentText.isEmpty()) return
+        if (currentText.isEmpty()) {
+            Toast.makeText(this, "Нет текста для обработки", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         if (!lucyProcessor.isReady()) {
             Toast.makeText(this, "Lucy загружается", Toast.LENGTH_SHORT).show()
             return
@@ -362,6 +379,8 @@ class MainActivity : FragmentActivity() {
 
         btnProcess.isEnabled = false
         layoutProgress.visibility = View.VISIBLE
+        progressBar.visibility = View.VISIBLE
+        tvProgressStatus.visibility = View.VISIBLE
 
         lifecycleScope.launch {
             try {
@@ -396,12 +415,15 @@ class MainActivity : FragmentActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     tvStatus.text = "❌ Ошибка: ${e.message}"
+                    Toast.makeText(this@MainActivity, "Ошибка: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             } finally {
                 runOnUiThread {
                     btnProcess.isEnabled = true
                     handler.postDelayed({
                         layoutProgress.visibility = View.GONE
+                        progressBar.visibility = View.GONE
+                        tvProgressStatus.visibility = View.GONE
                     }, 2000)
                 }
             }
