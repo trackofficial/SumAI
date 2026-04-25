@@ -1,6 +1,7 @@
 package com.example.sumai
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -12,15 +13,14 @@ import java.util.concurrent.TimeUnit
 class LucyProcessor(private val context: Context) {
 
     private var isModelReady = false
+    private var isDownloading = false
 
     companion object {
         private const val MODEL_URL = "https://huggingface.co/Menlo/Lucy-gguf/resolve/main/Lucy-Q4_K_M.gguf"
         private const val MODEL_FILENAME = "lucy.gguf"
+        private const val EXPECTED_SIZE_MB = 1110  // ~1.1 GB
+        private const val TAG = "LucyProcessor"
     }
-
-    /**
-     * Скачивает модель из интернета (без загрузки в память)
-     */
 
     suspend fun loadModel(
         onProgress: (Int) -> Unit,
@@ -28,75 +28,108 @@ class LucyProcessor(private val context: Context) {
         onError: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
         try {
-            val modelFile = File(context.filesDir, MODEL_FILENAME)
+            val modelFile = File(context.getExternalFilesDir(null), MODEL_FILENAME)
+            val existingSizeMB = if (modelFile.exists()) modelFile.length() / (1024 * 1024) else 0
 
-            // Если модели нет — скачиваем
-            if (!modelFile.exists()) {
-                downloadModel(modelFile, onProgress)
+            // Проверяем, что файл существует и имеет правильный размер
+            if (modelFile.exists() && existingSizeMB >= EXPECTED_SIZE_MB - 10) {
+                // Модель уже полностью скачана
+                Log.d(TAG, "Model already complete, size: $existingSizeMB MB")
+                withContext(Dispatchers.Main) {
+                    onProgress(100)
+                    isModelReady = true
+                    onReady()
+                }
             } else {
-                withContext(Dispatchers.Main) { onProgress(100) }
+                // Модели нет или она повреждена — скачиваем/докачиваем
+                if (modelFile.exists()) {
+                    Log.d(TAG, "Partial model found, size: $existingSizeMB MB, resuming...")
+                }
+                downloadModel(modelFile, onProgress, onReady, onError)
             }
 
-            isModelReady = true
-            withContext(Dispatchers.Main) { onReady() }
-
         } catch (e: Exception) {
-            withContext(Dispatchers.Main) { onError(e.message ?: "Ошибка скачивания Lucy") }
+            Log.e(TAG, "Error: ${e.message}", e)
+            withContext(Dispatchers.Main) { onError(e.message ?: "Ошибка") }
         }
     }
 
-    /**
-     * Скачивает модель с прогрессом
-     */
-    private suspend fun downloadModel(destFile: File, onProgress: (Int) -> Unit) {
+    private suspend fun downloadModel(
+        destFile: File,
+        onProgress: (Int) -> Unit,
+        onReady: () -> Unit,
+        onError: (String) -> Unit
+    ) {
         withContext(Dispatchers.IO) {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
-                .build()
+            try {
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(60, TimeUnit.SECONDS)
+                    .readTimeout(120, TimeUnit.SECONDS)
+                    .build()
 
-            val request = Request.Builder()
-                .url(MODEL_URL)
-                .build()
+                val existingSize = if (destFile.exists()) destFile.length() else 0L
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw Exception("Ошибка: HTTP ${response.code}")
-                }
+                val request = Request.Builder()
+                    .url(MODEL_URL)
+                    .addHeader("Range", "bytes=$existingSize-")
+                    .build()
 
-                val body = response.body ?: throw Exception("Нет данных")
-                val contentLength = body.contentLength()
+                client.newCall(request).execute().use { response ->
+                    if (response.code != 206 && response.code != 200) {
+                        throw Exception("Ошибка: HTTP ${response.code}")
+                    }
 
-                destFile.parentFile?.mkdirs()
+                    val body = response.body ?: throw Exception("Нет данных")
 
-                body.byteStream().use { input ->
-                    FileOutputStream(destFile).use { output ->
-                        val buffer = ByteArray(8192)
-                        var bytesCopied = 0L
-                        var bytesRead: Int
-                        var lastPercent = -1
+                    val totalLength = if (response.code == 206) {
+                        val contentRange = response.header("Content-Range") ?: ""
+                        contentRange.substringAfter("/").toLongOrNull()
+                            ?: existingSize + body.contentLength()
+                    } else {
+                        body.contentLength() + existingSize
+                    }
 
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                            bytesCopied += bytesRead
+                    destFile.parentFile?.mkdirs()
 
-                            if (contentLength > 0) {
-                                val percent = ((bytesCopied * 100) / contentLength).toInt()
-                                if (percent != lastPercent) {
-                                    lastPercent = percent
-                                    withContext(Dispatchers.Main) { onProgress(percent) }
+                    body.byteStream().use { input ->
+                        FileOutputStream(destFile, true).use { output ->
+                            val buffer = ByteArray(8192)
+                            var bytesCopied = existingSize
+                            var bytesRead: Int
+                            var lastPercent = -1
+
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                output.write(buffer, 0, bytesRead)
+                                bytesCopied += bytesRead
+
+                                if (totalLength > 0) {
+                                    val percent = ((bytesCopied * 100) / totalLength).toInt()
+                                    if (percent != lastPercent) {
+                                        lastPercent = percent
+                                        Log.d(TAG, "Progress: $percent%")
+                                        withContext(Dispatchers.Main) { onProgress(percent) }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+
+                // Скачивание завершено
+                Log.d(TAG, "Download complete! Size: ${destFile.length() / (1024 * 1024)} MB")
+                withContext(Dispatchers.Main) {
+                    onProgress(100)
+                    isModelReady = true
+                    onReady()
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Download error: ${e.message}", e)
+                withContext(Dispatchers.Main) { onError(e.message ?: "Ошибка скачивания") }
             }
         }
     }
 
-    /**
-     * Основной метод для обработки текста лекции (без реальной LLM)
-     */
     suspend fun processLecture(
         rawText: String,
         onStatus: (String) -> Unit,
@@ -106,7 +139,6 @@ class LucyProcessor(private val context: Context) {
 
         onStatus("📝 Анализ текста лекции...")
 
-        // Простой анализ: извлекаем ключевые фразы для поиска
         val sentences = rawText.split(Regex("[.!?]"))
         val searchQueries = sentences
             .map { it.trim() }
@@ -134,9 +166,9 @@ class LucyProcessor(private val context: Context) {
             if (searchResults.isEmpty()) {
                 append("Информация не найдена.\n")
             } else {
-                searchResults.forEach { (query, results) ->
+                searchResults.forEach { (query, info) ->
                     append("**По запросу:** $query\n\n")
-                    append("$results\n\n")
+                    append("$info\n\n")
                 }
             }
             append("\n## 💡 Ключевые выводы\n\n")

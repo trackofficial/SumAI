@@ -117,19 +117,21 @@ class MainActivity : FragmentActivity() {
         tvProgressMB.text = "0 МБ / ? МБ"
         tvProgressSpeed.text = ""
 
-// В onCreate, после инициализации lucyProcessor
+// В MainActivity, в вызове loadModel
         lifecycleScope.launch {
             lucyProcessor.loadModel(
                 onProgress = { progress ->
                     runOnUiThread {
+                        // Показываем прогресс всегда, даже если 100%
                         layoutProgress.visibility = View.VISIBLE
                         progressBar.visibility = View.VISIBLE
                         tvProgressStatus.visibility = View.VISIBLE
                         progressBar.progress = progress
-                        tvProgressStatus.text = "📥 Скачивание модели Lucy: $progress%"
+                        tvProgressStatus.text = "📥 Загрузка модели Lucy: $progress%"
 
                         if (progress == 100) {
                             tvProgressStatus.text = "✅ Модель готова!"
+                            // Не скрываем сразу, пусть пользователь увидит
                             handler.postDelayed({
                                 layoutProgress.visibility = View.GONE
                                 progressBar.visibility = View.GONE
@@ -141,7 +143,7 @@ class MainActivity : FragmentActivity() {
                 onReady = {
                     runOnUiThread {
                         tvStatus.text = "✅ Lucy готова к работе"
-                        btnProcess.isEnabled = true
+                        btnProcess.isEnabled = true  // ← Включаем кнопку!
                     }
                 },
                 onError = { error ->
