@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -20,6 +21,9 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.sumai.search.SearXNGBridge
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.vosk.Model
@@ -29,7 +33,7 @@ import java.io.FileOutputStream
 
 class MainActivity : FragmentActivity() {
 
-    private lateinit var tvResult: TextView
+    private lateinit var tvResult: EditText
     private lateinit var tvStatus: TextView
     private lateinit var tvTimer: TextView
     private lateinit var btnRecord: Button
@@ -39,27 +43,34 @@ class MainActivity : FragmentActivity() {
     private lateinit var btnClear: Button
     private lateinit var btnViewSummary: Button
     private lateinit var progressBar: ProgressBar
-    private lateinit var tvProgressMB: TextView
     private lateinit var tvProgressSpeed: TextView
     private lateinit var tvProgressStatus: TextView
     private lateinit var layoutProgress: LinearLayout
 
-    private var model: Model? = null
+    private lateinit var btnModeRu: Button
+    private lateinit var btnModeEn: Button
+    private lateinit var btnModeBoth: Button
+
+    private var ruModel: Model? = null
+    private var enModel: Model? = null
+    private var ruRecognizer: Recognizer? = null
+    private var enRecognizer: Recognizer? = null
+
+    private var recognitionMode = "ru"
+
     private var isRecording = false
     private var isPaused = false
     private var recordingJob: kotlinx.coroutines.Job? = null
     private var startTime = 0L
     private var pausedDuration = 0L
-    private var recognizer: Recognizer? = null
+    private var audioRecord: AudioRecord? = null
     private var currentText = ""
     private var currentSummaryText = ""
-    private var audioRecord: AudioRecord? = null
     private val handler = Handler(Looper.getMainLooper())
     private var timerRunnable: Runnable? = null
 
-    // Новые компоненты
-    private lateinit var lucyProcessor: LucyProcessor
     private lateinit var searxngBridge: SearXNGBridge
+    private lateinit var llmEdge: LLMEdge
 
     companion object {
         private const val PERMISSION_REQUEST_RECORD_AUDIO = 1
@@ -70,7 +81,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Инициализация UI элементов
+        // Инициализация View
         tvResult = findViewById(R.id.tvResult)
         tvStatus = findViewById(R.id.tvStatus)
         tvTimer = findViewById(R.id.tvTimer)
@@ -81,12 +92,15 @@ class MainActivity : FragmentActivity() {
         btnClear = findViewById(R.id.btnClear)
         btnViewSummary = findViewById(R.id.btnViewSummary)
         progressBar = findViewById(R.id.progressBar)
-        tvProgressMB = findViewById(R.id.tvProgressMB)
         tvProgressSpeed = findViewById(R.id.tvProgressSpeed)
         tvProgressStatus = findViewById(R.id.tvProgressStatus)
         layoutProgress = findViewById(R.id.layoutProgress)
 
-        // Настройка слушателей кнопок
+        btnModeRu = findViewById(R.id.btnModeRu)
+        btnModeEn = findViewById(R.id.btnModeEn)
+        btnModeBoth = findViewById(R.id.btnModeBoth)
+
+        // Настройка кнопок
         btnRecord.setOnClickListener { startRecording() }
         btnPause.setOnClickListener { togglePause() }
         btnStop.setOnClickListener { finishRecording() }
@@ -94,95 +108,142 @@ class MainActivity : FragmentActivity() {
         btnClear.setOnClickListener { clearText() }
         btnViewSummary.setOnClickListener { openMarkdownViewer() }
 
-        // Изначальное состояние кнопок
+        btnModeRu.setOnClickListener { setRecognitionMode("ru") }
+        btnModeEn.setOnClickListener { setRecognitionMode("en") }
+        btnModeBoth.setOnClickListener { setRecognitionMode("both") }
+
+        // Начальное состояние кнопок
         btnProcess.isEnabled = false
         btnPause.isEnabled = false
         btnStop.isEnabled = false
         btnViewSummary.isEnabled = false
+        btnModeRu.isEnabled = false
+        btnModeEn.isEnabled = false
+        btnModeBoth.isEnabled = false
 
-        // Инициализация поиска (бесплатный SearXNG)
+        // Инициализация мостов
         searxngBridge = SearXNGBridge()
+        llmEdge = LLMEdge(this, lifecycleScope)
 
-        // Инициализация Lucy
-        lucyProcessor = LucyProcessor(this)
-
-        // Показываем прогресс загрузки модели
+        // Показываем прогресс загрузки
         layoutProgress.visibility = View.VISIBLE
         progressBar.visibility = View.VISIBLE
         tvProgressStatus.visibility = View.VISIBLE
-        tvProgressMB.visibility = View.VISIBLE
         tvProgressSpeed.visibility = View.VISIBLE
 
         tvProgressStatus.text = "🚀 Запуск загрузки Lucy..."
-        tvProgressMB.text = "0 МБ / ? МБ"
         tvProgressSpeed.text = ""
 
-// В MainActivity, в вызове loadModel
-        lifecycleScope.launch {
-            lucyProcessor.loadModel(
-                onProgress = { progress ->
-                    runOnUiThread {
-                        // Показываем прогресс всегда, даже если 100%
-                        layoutProgress.visibility = View.VISIBLE
-                        progressBar.visibility = View.VISIBLE
-                        tvProgressStatus.visibility = View.VISIBLE
-                        progressBar.progress = progress
-                        tvProgressStatus.text = "📥 Загрузка модели Lucy: $progress%"
+        // Загружаем модель через llmEdge
+        llmEdge.loadModel(
+            onProgress = { progress ->
+                runOnUiThread {
+                    layoutProgress.visibility = View.VISIBLE
+                    progressBar.visibility = View.VISIBLE
+                    tvProgressStatus.visibility = View.VISIBLE
+                    progressBar.progress = progress
+                    tvProgressStatus.text = "📥 Загрузка модели Lucy: $progress%"
 
-                        if (progress == 100) {
-                            tvProgressStatus.text = "✅ Модель готова!"
-                            // Не скрываем сразу, пусть пользователь увидит
-                            handler.postDelayed({
-                                layoutProgress.visibility = View.GONE
-                                progressBar.visibility = View.GONE
-                                tvProgressStatus.visibility = View.GONE
-                            }, 1500)
-                        }
-                    }
-                },
-                onReady = {
-                    runOnUiThread {
-                        tvStatus.text = "✅ Lucy готова к работе"
-                        btnProcess.isEnabled = true  // ← Включаем кнопку!
-                    }
-                },
-                onError = { error ->
-                    runOnUiThread {
-                        tvStatus.text = "❌ Ошибка: $error"
-                        Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                    if (progress == 100) {
+                        tvProgressStatus.text = "✅ Модель готова!"
+                        handler.postDelayed({
+                            layoutProgress.visibility = View.GONE
+                            progressBar.visibility = View.GONE
+                            tvProgressStatus.visibility = View.GONE
+                        }, 1500)
                     }
                 }
-            )
-        }
+            },
+            onComplete = {
+                runOnUiThread {
+                    tvStatus.text = "✅ Lucy готова к работе"
+                    btnProcess.isEnabled = true
+                }
+            },
+            onError = { error ->
+                runOnUiThread {
+                    tvStatus.text = "❌ Ошибка: $error"
+                    Toast.makeText(this@MainActivity, error, Toast.LENGTH_LONG).show()
+                }
+            }
+        )
 
-        // Загрузка Vosk модели
+        // Запрос разрешений и загрузка Vosk
         if (hasPermission()) {
-            loadVoskModel()
+            loadBothModels()
         } else {
             requestPermission()
         }
     }
 
-    private fun loadVoskModel() {
-        tvStatus.text = "Загрузка Vosk модели..."
+    private fun loadBothModels() {
+        tvStatus.text = "Загрузка Vosk моделей..."
         btnRecord.isEnabled = false
 
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.IO).launch {
             try {
-                val modelDir = File(filesDir, "model-ru")
-                if (!modelDir.exists()) {
-                    copyModelFromAssets("model-ru", modelDir)
+                // Русская модель
+                val ruModelDir = File(filesDir, "model-ru")
+                if (!ruModelDir.exists()) {
+                    copyModelFromAssets("model-ru", ruModelDir)
                 }
-                model = Model(modelDir.absolutePath)
-                withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    tvStatus.text = "✅ Vosk модель готова"
+                ruModel = Model(ruModelDir.absolutePath)
+
+                // Английская модель
+                val enModelDir = File(filesDir, "model-en")
+                if (!enModelDir.exists()) {
+                    copyModelFromAssets("model-en", enModelDir)
+                }
+                enModel = Model(enModelDir.absolutePath)
+
+                withContext(Dispatchers.Main) {
+                    tvStatus.text = "✅ Vosk модели загружены"
                     btnRecord.isEnabled = true
-                    Toast.makeText(this@MainActivity, "Vosk загружен", Toast.LENGTH_SHORT).show()
+                    btnModeRu.isEnabled = true
+                    btnModeEn.isEnabled = true
+                    btnModeBoth.isEnabled = true
+                    setRecognitionMode("ru")
+                    Toast.makeText(this@MainActivity, "Vosk загружен (RU/EN)", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     tvStatus.text = "Ошибка Vosk: ${e.message}"
                 }
+            }
+        }
+    }
+
+    private fun setRecognitionMode(mode: String) {
+        recognitionMode = mode
+
+        // Закрываем старые распознаватели
+        ruRecognizer?.close()
+        enRecognizer?.close()
+        ruRecognizer = null
+        enRecognizer = null
+
+        when(mode) {
+            "ru" -> {
+                ruRecognizer = ruModel?.let { Recognizer(it, 16000.0f) }
+                tvStatus.text = "🎤 Режим: русский"
+                btnModeRu.isEnabled = false
+                btnModeEn.isEnabled = true
+                btnModeBoth.isEnabled = true
+            }
+            "en" -> {
+                enRecognizer = enModel?.let { Recognizer(it, 16000.0f) }
+                tvStatus.text = "🎤 Mode: English"
+                btnModeRu.isEnabled = true
+                btnModeEn.isEnabled = false
+                btnModeBoth.isEnabled = true
+            }
+            "both" -> {
+                ruRecognizer = ruModel?.let { Recognizer(it, 16000.0f) }
+                enRecognizer = enModel?.let { Recognizer(it, 16000.0f) }
+                tvStatus.text = "🌐 Режим: русский + English"
+                btnModeRu.isEnabled = true
+                btnModeEn.isEnabled = true
+                btnModeBoth.isEnabled = false
             }
         }
     }
@@ -193,7 +254,6 @@ class MainActivity : FragmentActivity() {
         for (file in files) {
             val assetFullPath = "$assetPath/$file"
             val destFile = File(destDir, file)
-
             if (assets.list(assetFullPath)?.isNotEmpty() == true) {
                 copyModelFromAssets(assetFullPath, destFile)
             } else {
@@ -230,7 +290,7 @@ class MainActivity : FragmentActivity() {
     private fun updateResult(text: String) {
         if (text.isNotEmpty() && text != currentText) {
             currentText = text
-            tvResult.text = currentText
+            tvResult.setText(currentText)
             if (currentText.isNotEmpty()) {
                 btnProcess.isEnabled = true
             }
@@ -242,7 +302,7 @@ class MainActivity : FragmentActivity() {
     private fun clearText() {
         currentText = ""
         currentSummaryText = ""
-        tvResult.text = ""
+        tvResult.text.clear()
         btnProcess.isEnabled = false
         btnViewSummary.isEnabled = false
         tvStatus.text = "Текст очищен"
@@ -250,8 +310,8 @@ class MainActivity : FragmentActivity() {
 
     @Suppress("MissingPermission")
     private fun startRecording() {
-        if (model == null) {
-            Toast.makeText(this, "Модель не загружена", Toast.LENGTH_SHORT).show()
+        if (ruModel == null && enModel == null) {
+            Toast.makeText(this, "Модели не загружены", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -265,13 +325,11 @@ class MainActivity : FragmentActivity() {
         btnViewSummary.isEnabled = false
         currentText = ""
         currentSummaryText = ""
-        tvResult.text = ""
-        tvStatus.text = "Запись..."
+        tvResult.text.clear()
+        tvStatus.text = if (recognitionMode == "both") "🌐 Запись (RU+EN)..." else "Запись..."
         startTimer()
 
-        recognizer = Recognizer(model, 16000.0f)
-
-        recordingJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        recordingJob = CoroutineScope(Dispatchers.IO).launch {
             val sampleRate = 16000
             val bufferSize = AudioRecord.getMinBufferSize(
                 sampleRate,
@@ -289,7 +347,7 @@ class MainActivity : FragmentActivity() {
                 )
 
                 if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    withContext(Dispatchers.Main) {
                         tvStatus.text = "Ошибка микрофона"
                         resetButtons()
                     }
@@ -301,29 +359,29 @@ class MainActivity : FragmentActivity() {
 
                 while (isRecording) {
                     if (isPaused) {
-                        kotlinx.coroutines.delay(100)
+                        delay(100)
                         continue
                     }
 
                     val bytesRead = audioRecord?.read(buffer, 0, buffer.size) ?: break
                     if (bytesRead > 0) {
-                        if (recognizer?.acceptWaveForm(buffer, bytesRead) == true) {
-                            val result = recognizer?.result
-                            result?.let {
-                                val text = parseResult(it)
-                                if (text.isNotEmpty()) {
-                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                        updateResult(text)
-                                    }
+                        when (recognitionMode) {
+                            "ru" -> processRecognizer(ruRecognizer, buffer, bytesRead)
+                            "en" -> processRecognizer(enRecognizer, buffer, bytesRead)
+                            "both" -> {
+                                val ruText = processRecognizerForResult(ruRecognizer, buffer, bytesRead)
+                                val enText = processRecognizerForResult(enRecognizer, buffer, bytesRead)
+
+                                val combined = when {
+                                    ruText.isNotEmpty() && enText.isNotEmpty() -> "[RU] $ruText\n[EN] $enText"
+                                    ruText.isNotEmpty() -> "[RU] $ruText"
+                                    enText.isNotEmpty() -> "[EN] $enText"
+                                    else -> ""
                                 }
-                            }
-                        } else {
-                            val partial = recognizer?.partialResult
-                            partial?.let {
-                                val text = parsePartialResult(it)
-                                if (text.isNotEmpty()) {
-                                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                        updateResult(text)
+
+                                if (combined.isNotEmpty()) {
+                                    withContext(Dispatchers.Main) {
+                                        updateResult(combined)
                                     }
                                 }
                             }
@@ -333,49 +391,116 @@ class MainActivity : FragmentActivity() {
 
                 audioRecord?.stop()
 
-                val finalResult = recognizer?.result
-                finalResult?.let {
-                    val text = parseResult(it)
-                    if (text.isNotEmpty()) {
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            updateResult(text)
+                when (recognitionMode) {
+                    "ru" -> getFinalResult(ruRecognizer)
+                    "en" -> getFinalResult(enRecognizer)
+                    "both" -> {
+                        val ruFinal = getFinalResultText(ruRecognizer)
+                        val enFinal = getFinalResultText(enRecognizer)
+                        val finalCombined = when {
+                            ruFinal.isNotEmpty() && enFinal.isNotEmpty() -> "[RU] $ruFinal\n[EN] $enFinal"
+                            ruFinal.isNotEmpty() -> "[RU] $ruFinal"
+                            enFinal.isNotEmpty() -> "[EN] $enFinal"
+                            else -> ""
+                        }
+                        if (finalCombined.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                updateResult(finalCombined)
+                            }
                         }
                     }
                 }
 
-                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     tvStatus.text = "Запись завершена"
                     resetButtons()
                     stopTimer()
                 }
 
             } catch (e: SecurityException) {
-                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     tvStatus.text = "Нет разрешения"
                     resetButtons()
                 }
             } catch (e: Exception) {
-                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     tvStatus.text = "Ошибка: ${e.message}"
                     resetButtons()
                 }
             } finally {
                 audioRecord?.release()
-                recognizer?.close()
-                recognizer = null
             }
         }
     }
 
+    private suspend fun processRecognizer(
+        recognizer: Recognizer?,
+        buffer: ByteArray,
+        bytesRead: Int
+    ) {
+        if (recognizer == null) return
+
+        if (recognizer.acceptWaveForm(buffer, bytesRead)) {
+            val text = parseResult(recognizer.result)
+            if (text.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    updateResult(text)
+                }
+            }
+        } else {
+            val partial = recognizer.partialResult
+            val text = parsePartialResult(partial)
+            if (text.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    updateResult(text)
+                }
+            }
+        }
+    }
+
+    private suspend fun processRecognizerForResult(
+        recognizer: Recognizer?,
+        buffer: ByteArray,
+        bytesRead: Int
+    ): String {
+        if (recognizer == null) return ""
+
+        return if (recognizer.acceptWaveForm(buffer, bytesRead)) {
+            parseResult(recognizer.result)
+        } else {
+            parsePartialResult(recognizer.partialResult)
+        }
+    }
+
+    private suspend fun getFinalResult(recognizer: Recognizer?) {
+        if (recognizer == null) return
+
+        val finalResult = recognizer.result
+        val text = parseResult(finalResult)
+        if (text.isNotEmpty()) {
+            withContext(Dispatchers.Main) {
+                updateResult(text)
+            }
+        }
+        recognizer.close()
+    }
+
+    private fun getFinalResultText(recognizer: Recognizer?): String {
+        if (recognizer == null) return ""
+        val result = recognizer.result
+        recognizer.close()
+        return parseResult(result)
+    }
 
     private fun processLecture() {
-        if (currentText.isEmpty()) {
+        val textToProcess = tvResult.text.toString()
+        if (textToProcess.isEmpty()) {
             Toast.makeText(this, "Нет текста для обработки", Toast.LENGTH_SHORT).show()
             return
         }
 
-        if (!lucyProcessor.isReady()) {
-            Toast.makeText(this, "Lucy загружается", Toast.LENGTH_SHORT).show()
+        if (!llmEdge.isReady()) {
+            Toast.makeText(this, "Lucy загружается. Пожалуйста, подождите.", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -383,33 +508,38 @@ class MainActivity : FragmentActivity() {
         layoutProgress.visibility = View.VISIBLE
         progressBar.visibility = View.VISIBLE
         tvProgressStatus.visibility = View.VISIBLE
+        progressBar.progress = 0
 
         lifecycleScope.launch {
             try {
-                val result = lucyProcessor.processLecture(
-                    rawText = currentText,
+                val result = llmEdge.createLectureSummary(
+                    rawText = textToProcess,
+                    internetSearch = { query ->
+                        searxngBridge.search(query)
+                    },
                     onStatus = { status ->
                         runOnUiThread {
                             tvProgressStatus.text = status
                             when {
-                                status.contains("Анализ") -> progressBar.progress = 25
-                                status.contains("Поиск") -> progressBar.progress = 50
-                                status.contains("Конспект") -> progressBar.progress = 75
+                                status.contains("Анализ", true) -> progressBar.progress = 20
+                                status.contains("темы", true) -> progressBar.progress = 40
+                                status.contains("Поиск", true) -> progressBar.progress = 50
+                                status.contains("Интернет", true) -> progressBar.progress = 60
+                                status.contains("Противоречия", true) -> progressBar.progress = 70
+                                status.contains("Конспект", true) || status.contains("генерация", true) -> progressBar.progress = 85
+                                status.contains("Готов", true) -> progressBar.progress = 100
                             }
                         }
-                    },
-                    onSearchRequest = { query ->
-                        searxngBridge.search(query)
                     }
                 )
 
                 runOnUiThread {
                     progressBar.progress = 100
-                    tvProgressStatus.text = "✅ Готово!"
+                    tvProgressStatus.text = "✅ Конспект готов!"
                     currentSummaryText = result
-                    tvResult.text = result
+                    tvResult.setText(result)
                     btnViewSummary.isEnabled = true
-                    tvStatus.text = "✅ Конспект готов!"
+                    tvStatus.text = "✅ Конспект успешно создан!"
                 }
 
                 saveToFile(result)
@@ -485,7 +615,7 @@ class MainActivity : FragmentActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_RECORD_AUDIO) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                loadVoskModel()
+                loadBothModels()
             } else {
                 tvStatus.text = "Нет разрешения на запись"
             }
@@ -496,9 +626,11 @@ class MainActivity : FragmentActivity() {
         super.onDestroy()
         stopTimer()
         recordingJob?.cancel()
-        recognizer?.close()
-        model?.close()
-        lucyProcessor.close()
+        ruRecognizer?.close()
+        enRecognizer?.close()
+        ruModel?.close()
+        enModel?.close()
+        llmEdge.close()
     }
 
     private fun togglePause() {

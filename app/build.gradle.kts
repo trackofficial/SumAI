@@ -34,6 +34,14 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // ОСТАВЬ ТОЛЬКО ЭТО
+    packagingOptions {
+        pickFirst("**/libllama.so")
+        pickFirst("**/libggml.so")
+        pickFirst("**/libllama-common.so")
+        pickFirst("**/libggml-base.so")
+    }
 }
 
 dependencies {
@@ -64,7 +72,8 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
-    implementation("io.github.ljcamargo:llamacpp-kotlin:0.2.0")
+    // Llamacpp-kotlin
+    implementation("io.github.ljcamargo:llamacpp-kotlin:0.4.0")
 
     // HTTP и JSON (для SearXNG)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
